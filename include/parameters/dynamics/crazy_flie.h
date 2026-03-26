@@ -98,18 +98,5 @@ namespace rl_tools::rl::environments::multirotor::parameters::dynamics{
             // T, RPM time constant
             0.15,
             // action limit
-            {0, 21702},
-                        // control limits (ctbr)
-                        {4.0, 2.0, 0.0, 19.62},
-                        // rate controller
-                        {
-                                {0.0005, 0.0005, 0.0004},
-                                {0.0003, 0.0003, 0.0002},
-                                {0.0006, 0.0006, 0.00025},
-                                {0.0, 0.0, 0.0},
-                                {0.03, 0.03, 0.10},
-                                {0.0025, 0.0025, 0.0020},
-                                {0.50, 0.50, 0.55}
-                        }
-    };
+            {0, 21702},    };
 }
