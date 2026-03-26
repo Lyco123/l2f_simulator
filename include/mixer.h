@@ -40,6 +40,59 @@ namespace rl_tools::rl::environments::multirotor {
     }
 
     template<typename DEVICE, typename T, typename PARAMETERS>
+    RL_TOOLS_FUNCTION_PLACEMENT void power_distribution_force_torque(
+            DEVICE& device,
+            const PARAMETERS& params,
+            T thrust_acceleration,
+            const T desired_torque[3],
+            T desired_thrust_uncapped[4]
+    ){
+        const T thrust_acceleration_clamped = math::clamp(
+            device.math,
+            thrust_acceleration,
+            params.dynamics.control_limits.thrust_acceleration_min,
+            params.dynamics.control_limits.thrust_acceleration_max
+        );
+        const T total_thrust = thrust_acceleration_clamped * params.dynamics.mass;
+
+        const T rotor_x = params.dynamics.rotor_positions[0][0];
+        const T rotor_y = params.dynamics.rotor_positions[0][1];
+        const T arm_length = math::sqrt(device.math, rotor_x * rotor_x + rotor_y * rotor_y);
+        const T arm = (T)0.707106781 * arm_length;
+        const T arm_safe = arm > (T)1e-9 ? arm : (T)1e-9;
+
+        const T roll_part = ((T)0.25 / arm_safe) * desired_torque[0];
+        const T pitch_part = ((T)0.25 / arm_safe) * desired_torque[1];
+        const T thrust_part = (T)0.25 * total_thrust;
+        const T torque_constant_safe = math::abs(device.math, params.dynamics.torque_constant) > (T)1e-12 ? params.dynamics.torque_constant : (T)1e-12;
+        const T yaw_part = ((T)0.25 / torque_constant_safe) * desired_torque[2];
+
+        desired_thrust_uncapped[0] = thrust_part - roll_part - pitch_part - yaw_part;
+        desired_thrust_uncapped[1] = thrust_part - roll_part + pitch_part + yaw_part;
+        desired_thrust_uncapped[2] = thrust_part + roll_part + pitch_part - yaw_part;
+        desired_thrust_uncapped[3] = thrust_part + roll_part - pitch_part + yaw_part;
+    }
+
+    template<typename DEVICE, typename T>
+    RL_TOOLS_FUNCTION_PLACEMENT void power_distribution_cap(
+            DEVICE& device,
+            const T desired_thrust_uncapped[4],
+            T rotor_thrust_min,
+            T rotor_thrust_max,
+            T desired_thrust_capped[4]
+    ){
+        T highest_thrust_found = desired_thrust_uncapped[0];
+        for(typename DEVICE::index_t rotor_i = 1; rotor_i < 4; rotor_i++){
+            highest_thrust_found = desired_thrust_uncapped[rotor_i] > highest_thrust_found ? desired_thrust_uncapped[rotor_i] : highest_thrust_found;
+        }
+
+        const T reduction = highest_thrust_found > rotor_thrust_max ? (highest_thrust_found - rotor_thrust_max) : (T)0;
+        for(typename DEVICE::index_t rotor_i = 0; rotor_i < 4; rotor_i++){
+            desired_thrust_capped[rotor_i] = math::clamp(device.math, desired_thrust_uncapped[rotor_i] - reduction, rotor_thrust_min, rotor_thrust_max);
+        }
+    }
+
+    template<typename DEVICE, typename T, typename PARAMETERS>
     RL_TOOLS_FUNCTION_PLACEMENT void mix_ctbr_to_rpm(
             DEVICE& device,
             const PARAMETERS& params,
@@ -47,90 +100,16 @@ namespace rl_tools::rl::environments::multirotor {
             const T desired_torque[3],
             T desired_rpm[4]
     ){
-        T thrust_acceleration_clamped = math::clamp(
-            device.math,
-            thrust_acceleration,
-            params.dynamics.control_limits.thrust_acceleration_min,
-            params.dynamics.control_limits.thrust_acceleration_max
-        );
-        T b[4] = {
-            thrust_acceleration_clamped * params.dynamics.mass,
-            desired_torque[0],
-            desired_torque[1],
-            desired_torque[2]
-        };
-
-        T augmented[4][5];
-        for(typename DEVICE::index_t i = 0; i < 4; i++){
-            const T x = params.dynamics.rotor_positions[i][0];
-            const T y = params.dynamics.rotor_positions[i][1];
-            const T yaw_factor = params.dynamics.rotor_torque_directions[i][2] * params.dynamics.torque_constant;
-            augmented[0][i] = 1;
-            augmented[1][i] = y;
-            augmented[2][i] = -x;
-            augmented[3][i] = yaw_factor;
-        }
-        for(typename DEVICE::index_t i = 0; i < 4; i++){
-            augmented[i][4] = b[i];
-        }
-
-        for(typename DEVICE::index_t pivot_i = 0; pivot_i < 4; pivot_i++){
-            T pivot = augmented[pivot_i][pivot_i];
-            if(math::abs(device.math, pivot) < (T)1e-9){
-                for(typename DEVICE::index_t swap_i = pivot_i + 1; swap_i < 4; swap_i++){
-                    if(math::abs(device.math, augmented[swap_i][pivot_i]) >= (T)1e-9){
-                        for(typename DEVICE::index_t col_i = 0; col_i < 5; col_i++){
-                            const T tmp = augmented[pivot_i][col_i];
-                            augmented[pivot_i][col_i] = augmented[swap_i][col_i];
-                            augmented[swap_i][col_i] = tmp;
-                        }
-                        pivot = augmented[pivot_i][pivot_i];
-                        break;
-                    }
-                }
-            }
-            if(math::abs(device.math, pivot) < (T)1e-9){
-                continue;
-            }
-            for(typename DEVICE::index_t col_i = pivot_i; col_i < 5; col_i++){
-                augmented[pivot_i][col_i] /= pivot;
-            }
-            for(typename DEVICE::index_t row_i = 0; row_i < 4; row_i++){
-                if(row_i == pivot_i){
-                    continue;
-                }
-                const T factor = augmented[row_i][pivot_i];
-                for(typename DEVICE::index_t col_i = pivot_i; col_i < 5; col_i++){
-                    augmented[row_i][col_i] -= factor * augmented[pivot_i][col_i];
-                }
-            }
-        }
-
-        T desired_thrust[4];
-        T min_thrust = augmented[0][4];
-        T max_thrust = augmented[0][4];
-        for(typename DEVICE::index_t rotor_i = 0; rotor_i < 4; rotor_i++){
-            desired_thrust[rotor_i] = augmented[rotor_i][4];
-            min_thrust = desired_thrust[rotor_i] < min_thrust ? desired_thrust[rotor_i] : min_thrust;
-            max_thrust = desired_thrust[rotor_i] > max_thrust ? desired_thrust[rotor_i] : max_thrust;
-        }
+        T desired_thrust_uncapped[4];
+        power_distribution_force_torque(device, params, thrust_acceleration, desired_torque, desired_thrust_uncapped);
 
         const T rotor_thrust_min = 0;
         const T rotor_thrust_max = rpm_to_thrust(device, params.dynamics.thrust_constants, params.dynamics.action_limit.max);
-
-        const T shift_lower = rotor_thrust_min - min_thrust;
-        const T shift_upper = rotor_thrust_max - max_thrust;
-        T collective_shift;
-        if(shift_lower <= shift_upper){
-            // PX4-style desaturation: apply a common shift so torque-producing differential terms are preserved.
-            collective_shift = math::clamp(device.math, (T)0, shift_lower, shift_upper);
-        }
-        else{
-            collective_shift = (shift_lower + shift_upper) / 2;
-        }
+        T desired_thrust_capped[4];
+        power_distribution_cap(device, desired_thrust_uncapped, rotor_thrust_min, rotor_thrust_max, desired_thrust_capped);
 
         for(typename DEVICE::index_t rotor_i = 0; rotor_i < 4; rotor_i++){
-            const T thrust = math::clamp(device.math, desired_thrust[rotor_i] + collective_shift, rotor_thrust_min, rotor_thrust_max);
+            const T thrust = desired_thrust_capped[rotor_i];
             T rpm = thrust_to_rpm(device, params.dynamics.thrust_constants, thrust);
             desired_rpm[rotor_i] = math::clamp(device.math, rpm, params.dynamics.action_limit.min, params.dynamics.action_limit.max);
         }

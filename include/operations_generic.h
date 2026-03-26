@@ -261,6 +261,7 @@ namespace rl_tools{
         for(typename DEVICE::index_t i = 0; i < 3; i++){
             state.angular_velocity[i] = 0;
         }
+        rl::environments::multirotor::reset_body_rate_controller(device, env);
         initial_parameters(device, env, state);
     }
     template<typename DEVICE, typename T, typename TI, typename SPEC, typename NEXT_COMPONENT>
@@ -337,6 +338,7 @@ namespace rl_tools{
         for(TI i = 0; i < 3; i++){
             state.angular_velocity[i] = random::uniform_real_distribution(random_dev, -env.parameters.mdp.init.max_angular_velocity, env.parameters.mdp.init.max_angular_velocity, rng);
         }
+        rl::environments::multirotor::reset_body_rate_controller(device, env);
         initial_parameters(device, env, state);
     }
     template<typename DEVICE, typename T_S, typename TI_S, typename SPEC, typename NEXT_COMPONENT, typename RNG>
@@ -706,7 +708,7 @@ namespace rl_tools{
 //    }
     // todo: make state const again
     template<typename DEVICE, typename SPEC, typename ACTION_SPEC, typename RNG>
-    RL_TOOLS_FUNCTION_PLACEMENT static typename SPEC::T step(DEVICE& device, const rl::environments::Multirotor<SPEC>& env, const typename rl::environments::Multirotor<SPEC>::State& state, const Matrix<ACTION_SPEC>& action, typename rl::environments::Multirotor<SPEC>::State& next_state, RNG& rng) {
+    RL_TOOLS_FUNCTION_PLACEMENT static typename SPEC::T step(DEVICE& device, rl::environments::Multirotor<SPEC>& env, const typename rl::environments::Multirotor<SPEC>::State& state, const Matrix<ACTION_SPEC>& action, typename rl::environments::Multirotor<SPEC>::State& next_state, RNG& rng) {
         using STATE = typename rl::environments::Multirotor<SPEC>::State;
         using T = typename SPEC::T;
         using TI = typename DEVICE::index_t;
@@ -726,7 +728,7 @@ namespace rl_tools{
         T desired_thrust_acceleration;
         rl::environments::multirotor::normalized_action_to_ctbr_command(device, env.parameters, action_noisy_normalized, desired_angular_velocity, desired_thrust_acceleration);
         T desired_torque[3];
-        rl::environments::multirotor::body_rate_controller(device, env.parameters, static_cast<const rl::environments::multirotor::StateBase<T, TI>&>(state), desired_angular_velocity, desired_torque);
+        rl::environments::multirotor::body_rate_controller(device, env, static_cast<const rl::environments::multirotor::StateBase<T, TI>&>(state), desired_angular_velocity, desired_torque);
         rl::environments::multirotor::mix_ctbr_to_rpm(device, env.parameters, desired_thrust_acceleration, desired_torque, action_scaled);
         utils::integrators::rk4  <DEVICE, typename SPEC::T, typename SPEC::PARAMETERS, STATE, ACTION_DIM, rl::environments::multirotor::multirotor_dynamics_dispatch<DEVICE, typename SPEC::T, typename SPEC::PARAMETERS, STATE>>(device, env.parameters, state, action_scaled, env.parameters.integration.dt, next_state);
 //        utils::integrators::euler<DEVICE, typename SPEC::T, typename SPEC::PARAMETERS, STATE, ACTION_DIM, rl::environments::multirotor::multirotor_dynamics_dispatch<DEVICE, typename SPEC::T, typename SPEC::PARAMETERS, STATE>>(device, env.parameters, state, action_scaled, env.parameters.integration.dt, next_state);

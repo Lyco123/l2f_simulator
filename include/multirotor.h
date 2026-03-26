@@ -19,7 +19,13 @@ namespace rl_tools::rl::environments::multirotor{
             };
             struct RateController{
                 T kp[3] = {(T)0.0025, (T)0.0025, (T)0.0015};
+                T ki[3] = {(T)0.0, (T)0.0, (T)0.0};
+                T kd[3] = {(T)0.0, (T)0.0, (T)0.0};
+                T kff[3] = {(T)0.0, (T)0.0, (T)0.0};
+                T integral_limit[3] = {(T)0.0, (T)0.0, (T)0.0};
                 T torque_limit[3] = {(T)0.02, (T)0.02, (T)0.01};
+                T derivative_lpf_alpha[3] = {(T)0.7, (T)0.7, (T)0.7};
+                T gyroscopic_compensation_gain = (T)1.0;
             };
             T rotor_positions[N][3];
             T rotor_thrust_directions[N][3];
@@ -415,6 +421,13 @@ namespace rl_tools::rl::environments{
         using STATIC_PARAMETERS = typename SPEC::STATIC_PARAMETERS;
         typename SPEC::PARAMETERS parameters;
         typename SPEC::PARAMETERS::Dynamics current_dynamics;
+        struct RateControllerState{
+            T integral[3] = {0, 0, 0};
+            T prev_angular_velocity[3] = {0, 0, 0};
+            T prev_derivative[3] = {0, 0, 0};
+            bool initialized = false;
+        };
+        mutable RateControllerState rate_controller_state;
     };
 }
 

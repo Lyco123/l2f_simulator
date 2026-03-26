@@ -194,8 +194,18 @@ TEST(RL_TOOLS_RL_ENVIRONMENTS_MULTIROTOR_CTBR, STEP_RESPONSE_TENSORBOARD_LOG){
             rlt::step(device, env, state, action, next_state, rng);
             state = next_state;
 
+            T total_thrust = 0;
+            for(TI rotor_i = 0; rotor_i < 4; rotor_i++){
+                total_thrust += rlt::rl::environments::multirotor::rpm_to_thrust(device, env.parameters.dynamics.thrust_constants, state.rpm[rotor_i]);
+            }
+            const T actual_thrust_acceleration = total_thrust / env.parameters.dynamics.mass;
+
             rlt::set_step(device, device.logger, global_step);
             rlt::add_scalar(device, device.logger, std::string("ctbr_step/") + axis_name[axis_i] + "/command", axis_cmd);
+            rlt::add_scalar(device, device.logger, std::string("ctbr_step/") + axis_name[axis_i] + "/actual_wx", state.angular_velocity[0]);
+            rlt::add_scalar(device, device.logger, std::string("ctbr_step/") + axis_name[axis_i] + "/actual_wy", state.angular_velocity[1]);
+            rlt::add_scalar(device, device.logger, std::string("ctbr_step/") + axis_name[axis_i] + "/actual_wz", state.angular_velocity[2]);
+            rlt::add_scalar(device, device.logger, std::string("ctbr_step/") + axis_name[axis_i] + "/actual_thrust_acceleration", actual_thrust_acceleration);
             rlt::add_scalar(device, device.logger, std::string("ctbr_step/") + axis_name[axis_i] + "/wx", state.angular_velocity[0]);
             rlt::add_scalar(device, device.logger, std::string("ctbr_step/") + axis_name[axis_i] + "/wy", state.angular_velocity[1]);
             rlt::add_scalar(device, device.logger, std::string("ctbr_step/") + axis_name[axis_i] + "/wz", state.angular_velocity[2]);
